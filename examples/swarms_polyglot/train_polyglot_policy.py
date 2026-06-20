@@ -443,7 +443,7 @@ def build_coding_prompt(
 ) -> str:
     history_text = json.dumps(history[-12:], indent=2, ensure_ascii=True)
     starter_files = sorted(list(example.starter_code.keys()))
-    test_files = sorted(list(example.test_files.keys()))
+    test_files = sorted(list(example.test_files.keys())) if _leak_polyglot_tests() else []
     build_files = sorted(list(example.build_files.keys()))
     return f"""You are solving one coding task inside an isolated workspace.
 
@@ -508,6 +508,31 @@ Use at most one tool per response. Do not include markdown fences or prose outsi
 """
 
 
+def _leak_polyglot_tests() -> bool:
+    """Whether to expose the hidden polyglot test files to the GEPA solver.
+
+    Default False: the solver sees spec + stub only (matching KCSI and
+    HyperAgents); the hidden tests are applied only at grading. Set
+    ``KCSI_GEPA_LEAK_POLYGLOT_TESTS=1`` to write the tests into the solver
+    workspace for reproducing earlier, test-visible baseline numbers.
+    """
+    val = os.environ.get("KCSI_GEPA_LEAK_POLYGLOT_TESTS", "")
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _write_test_files(target_dir: Path, example: PolyglotExample) -> None:
+    """Write the hidden test files into ``target_dir`` with the same
+    per-language normalizations the grader expects. Called at grade time in
+    the default (hidden-test) regime, and at workspace-prep time only when
+    the leak flag is set."""
+    for name, content in example.test_files.items():
+        if example.language == "javascript":
+            content = content.replace("xtest(", "test(").replace("xit(", "it(")
+        if example.language == "java":
+            content = re.sub(r'@Disabled(?:\("[^"]*"\))?\s*\n', "", content)
+        _safe_write(target_dir, name, content)
+
+
 def prepare_workspace(example: PolyglotExample) -> Path:
     tmpdir_root = Path(tempfile.mkdtemp(prefix="gepa-polyglot-"))
     tmpdir = tmpdir_root / example.exercise_name if example.language == "cpp" else tmpdir_root
@@ -515,12 +540,11 @@ def prepare_workspace(example: PolyglotExample) -> Path:
 
     for name, content in example.build_files.items():
         _safe_write(tmpdir, name, content)
-    for name, content in example.test_files.items():
-        if example.language == "javascript":
-            content = content.replace("xtest(", "test(").replace("xit(", "it(")
-        if example.language == "java":
-            content = re.sub(r'@Disabled(?:\("[^"]*"\))?\s*\n', "", content)
-        _safe_write(tmpdir, name, content)
+    # Default (hidden-test) regime: do NOT write the test files into the
+    # solver workspace; they are added at grade time. Only write them here
+    # when the leak flag is set (reproduces earlier, test-visible numbers).
+    if _leak_polyglot_tests():
+        _write_test_files(tmpdir, example)
     for name, content in example.starter_code.items():
         _safe_write(tmpdir, name, content)
     return tmpdir_root
@@ -710,6 +734,12 @@ def run_policy_on_example(
                 }
             )
 
+        # Hidden-test regime: the solver never saw the test files (they were
+        # not written into its bind-mounted workspace). Write them now, just
+        # before grading, so the grader can run them. (When leaking, they are
+        # already present from prepare_workspace; re-writing is idempotent.)
+        if not _leak_polyglot_tests():
+            _write_test_files(workspace_dir, example)
         test_cmd = example.test_command
         full_cmd = f"{setup_cmd} && {test_cmd}" if setup_cmd else test_cmd
         if example.language == "cpp" and "cmake" in full_cmd:
