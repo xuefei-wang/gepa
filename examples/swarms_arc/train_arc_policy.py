@@ -196,6 +196,41 @@ def evaluate_predictions(preds: list[Any], golds: list[list[list[int]]]) -> tupl
     return score, results
 
 
+def _leak_arc_test_gold() -> bool:
+    """Whether to expose hidden ARC test gold to the reflection LM.
+
+    Default ``False``: the GEPA reflection LM (the adaptive component) must
+    not receive the hidden test answer, matching KCSI's ARC information
+    regime (only ``{test_index, correct}`` for hidden test pairs). Set
+    ``KCSI_GEPA_ARC_LEAK_TEST_GOLD=1`` to restore the pre-fix behavior for
+    reproducing earlier, information-leaky baseline numbers.
+    """
+    val = os.environ.get("KCSI_GEPA_ARC_LEAK_TEST_GOLD", "")
+    return val.strip().lower() not in ("", "0", "false", "no")
+
+
+def _test_feedback_row(item: dict[str, Any]) -> dict[str, Any]:
+    """Reflective-dataset row for a hidden *test* pair.
+
+    The gold output grid and the differing-cell positions are derived from
+    the hidden ARC answer, so by default they are withheld from the
+    reflection LM; only ``{idx, correct}`` plus the solver's own prediction
+    (in-channel) are surfaced. Train pairs keep full detail elsewhere.
+    """
+    row = {
+        "idx": item.get("idx"),
+        "correct": item.get("correct"),
+        "prediction": item.get("prediction"),
+    }
+    if _leak_arc_test_gold():
+        row["feedback"] = item.get("feedback")
+        row["gold"] = item.get("gold")
+    else:
+        row["feedback"] = "correct" if item.get("correct") else "incorrect"
+    return row
+
+
+
 def evaluate_test_attempts(preds: list[Any], golds: list[list[list[int]]]) -> tuple[float, list[dict[str, Any]]]:
     normalized: list[list[Any]] = []
     for pred in preds:
@@ -438,14 +473,7 @@ class ArcPolicyAdapter(GEPAAdapter[ArcExample, dict[str, Any], dict[str, Any]]):
                         for item in row.get("train_results", [])
                     ],
                     "Test Feedback": [
-                        {
-                            "idx": item.get("idx"),
-                            "correct": item.get("correct"),
-                            "feedback": item.get("feedback"),
-                            "gold": item.get("gold"),
-                            "prediction": item.get("prediction"),
-                        }
-                        for item in row.get("test_results", [])
+                        _test_feedback_row(item) for item in row.get("test_results", [])
                     ],
                     "Model Raw Output": row.get("raw_response", "")[:4000],
                     "Parser Error": row.get("parse_error"),
