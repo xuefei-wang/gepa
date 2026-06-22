@@ -206,7 +206,11 @@ def _leak_arc_test_gold() -> bool:
     reproducing earlier, information-leaky baseline numbers.
     """
     val = os.environ.get("KCSI_GEPA_ARC_LEAK_TEST_GOLD", "")
-    return val.strip().lower() not in ("", "0", "false", "no")
+    # Strict allow-list (fail closed): only an explicit truthy value enables
+    # the leak, so a typo/ambiguous value (e.g. "off", "2") keeps the
+    # integrity-preserving default. Matches _leak_polyglot_tests and the
+    # KCSI in-repo OpenEvolve gates.
+    return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _test_feedback_row(item: dict[str, Any]) -> dict[str, Any]:
