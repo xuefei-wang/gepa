@@ -186,9 +186,7 @@ def infer_litellm_model(model: str | None = None, provider: str | None = None) -
     provider = (provider or os.environ.get("MODEL_PROVIDER") or "").strip()
     model = (model or os.environ.get("MODEL") or "").strip()
     if not model:
-        raise ValueError(
-            "No model configured. Set MODEL / MODEL_PROVIDER in the environment or pass --model."
-        )
+        raise ValueError("No model configured. Set MODEL / MODEL_PROVIDER in the environment or pass --model.")
     if "/" in model or not provider:
         return model
     return f"{provider}/{model}"
@@ -290,10 +288,7 @@ class WorkspaceEditor:
 
     def _format_output(self, content: str, path: str, start_line: int = 1) -> str:
         content = content.expandtabs()
-        lines = [
-            f"{idx + start_line:6}\t{line}"
-            for idx, line in enumerate(_truncate(content, 8000).splitlines())
-        ]
+        lines = [f"{idx + start_line:6}\t{line}" for idx, line in enumerate(_truncate(content, 8000).splitlines())]
         return f"cat -n {path}\n" + "\n".join(lines)
 
     def tool(self, command: str, path: str, **kwargs: Any) -> str:
@@ -442,9 +437,9 @@ def build_coding_prompt(
     max_tool_calls: int,
 ) -> str:
     history_text = json.dumps(history[-12:], indent=2, ensure_ascii=True)
-    starter_files = sorted(list(example.starter_code.keys()))
-    test_files = sorted(list(example.test_files.keys())) if _leak_polyglot_tests() else []
-    build_files = sorted(list(example.build_files.keys()))
+    starter_files = sorted(example.starter_code.keys())
+    test_files = sorted(example.test_files.keys()) if _leak_polyglot_tests() else []
+    build_files = sorted(example.build_files.keys())
     return f"""You are solving one coding task inside an isolated workspace.
 
 Follow the coding solver policy exactly.
@@ -519,6 +514,7 @@ def _leak_polyglot_tests() -> bool:
     val = os.environ.get("KCSI_GEPA_LEAK_POLYGLOT_TESTS", "")
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
+
 def _leak_test_output() -> bool:
     """Whether to feed the hidden test-runner stdout/stderr tails to the reflection LM.
 
@@ -532,6 +528,18 @@ def _leak_test_output() -> bool:
     """
     val = os.environ.get("KCSI_GEPA_LEAK_TEST_OUTPUT", "")
     return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _redact_test_output_from_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Return a trace-safe result for GEPA reflection/history consumers."""
+    if _leak_test_output():
+        return result
+    redacted = dict(result)
+    redacted["test_stdout_tail"] = ""
+    redacted["test_stderr_tail"] = ""
+    redacted["test_result"] = ""
+    redacted["test_output_withheld"] = True
+    return redacted
 
 
 def _information_regime_summary() -> dict[str, Any]:
@@ -930,7 +938,7 @@ class PolyglotPolicyAdapter(GEPAAdapter[PolyglotExample, dict[str, Any], dict[st
                     "test_score": float(result["native_score"]),
                 }
                 if capture_traces:
-                    trajectories[idx] = result
+                    trajectories[idx] = _redact_test_output_from_result(result)
 
         eval_cost = sum(float(obj.get("total_cost", 0.0)) for obj in outputs if isinstance(obj, dict))
         eval_tokens_in = sum(int(obj.get("total_tokens_in", 0)) for obj in outputs if isinstance(obj, dict))
@@ -1060,7 +1068,9 @@ def main() -> None:
 
     dataset_path = (args.dataset or default_dataset_path()).resolve()
     model_id = infer_litellm_model(args.model, args.provider)
-    reflection_model = infer_litellm_model(args.reflection_model or args.model, args.reflection_provider or args.provider)
+    reflection_model = infer_litellm_model(
+        args.reflection_model or args.model, args.reflection_provider or args.provider
+    )
     reflection_lm = LM(reflection_model, temperature=0.0)
     ensure_docker_image_exists(args.docker_image)
 
@@ -1068,8 +1078,7 @@ def main() -> None:
     examples = load_polyglot_examples(dataset_path, task_limit=args.task_limit, task_ids=task_ids)
     reflection_minibatch_size = len(examples)
     run_dir = args.run_dir or (
-        Path("results/internal_ddl")
-        / f"gepa_polyglot_{model_id.split('/')[-1].replace(':', '_')}_train{len(examples)}"
+        Path("results/internal_ddl") / f"gepa_polyglot_{model_id.split('/')[-1].replace(':', '_')}_train{len(examples)}"
     )
     run_dir.mkdir(parents=True, exist_ok=True)
 
