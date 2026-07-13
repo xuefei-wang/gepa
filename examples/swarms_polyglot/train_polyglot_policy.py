@@ -534,6 +534,22 @@ def _leak_test_output() -> bool:
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _information_regime_summary() -> dict[str, Any]:
+    return {
+        "polyglot_hidden_tests_visible_to_solver": _leak_polyglot_tests(),
+        "reflection_test_output_tails_visible": _leak_test_output(),
+        "default": "fair",
+        "legacy_reproduction_flags": {
+            "KCSI_GEPA_LEAK_POLYGLOT_TESTS": (
+                "Set to 1/true/yes/on to write hidden Polyglot tests into the solver workspace."
+            ),
+            "KCSI_GEPA_LEAK_TEST_OUTPUT": (
+                "Set to 1/true/yes/on to feed hidden test-runner stdout/stderr tails to reflection."
+            ),
+        },
+    }
+
+
 def _write_test_files(target_dir: Path, example: PolyglotExample) -> None:
     """Write the hidden test files into ``target_dir`` with the same
     per-language normalizations the grader expects. Called at grade time in
@@ -1148,6 +1164,7 @@ def main() -> None:
         "final": final_summary,
         "final_task_eval": final_task_eval_summary,
         "overall": overall_summary,
+        "information_regime": _information_regime_summary(),
         "best_candidate": best_candidate,
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
