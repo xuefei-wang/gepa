@@ -519,6 +519,20 @@ def _leak_polyglot_tests() -> bool:
     val = os.environ.get("KCSI_GEPA_LEAK_POLYGLOT_TESTS", "")
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
+def _leak_test_output() -> bool:
+    """Whether to feed the hidden test-runner stdout/stderr tails to the reflection LM.
+
+    Default False: the reflection LM (the adaptive component) sees only the scalar
+    pass/fail score plus the agent's own output -- NOT the grader's stdout/stderr
+    tails, which name the hidden tests and print their assertions -- matching the
+    per-task solver's information regime. Set ``KCSI_GEPA_LEAK_TEST_OUTPUT=1`` to
+    feed the tails back into the reflective dataset for reproducing earlier,
+    information-leaky baseline numbers. Mirrors _leak_polyglot_tests /
+    _leak_arc_test_gold (leak-closed by default; env re-enables).
+    """
+    val = os.environ.get("KCSI_GEPA_LEAK_TEST_OUTPUT", "")
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _write_test_files(target_dir: Path, example: PolyglotExample) -> None:
     """Write the hidden test files into ``target_dir`` with the same
@@ -945,8 +959,8 @@ class PolyglotPolicyAdapter(GEPAAdapter[PolyglotExample, dict[str, Any], dict[st
                     "Final Summary": row.get("final_summary", ""),
                     "Parser Error": row.get("parse_error"),
                     "Execution Error": row.get("exec_error"),
-                    "Test Stdout Tail": row.get("test_stdout_tail", ""),
-                    "Test Stderr Tail": row.get("test_stderr_tail", ""),
+                    "Test Stdout Tail": row.get("test_stdout_tail", "") if _leak_test_output() else "",
+                    "Test Stderr Tail": row.get("test_stderr_tail", "") if _leak_test_output() else "",
                     "Tool History": row.get("history", [])[-8:],
                     "Model Raw Output": row.get("raw_response", "")[:4000],
                 }
